@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+
+<!-- 
+    Author: yzh5606
+ -->
+
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>
+        charges
+    </title>
+</head>
+
+<body>
+    <p>
+        Copyright 2023 yzh5606, All rights reserved.<br \>
+        This software is licenced under the MIT licence. For further information, click <a href="LICENCE.txt">here</a>.<br \>
+        本页面及脚本以MIT许可发布。有关更多信息, 参阅<a href="LICENCE.txt">这里</a>。
+    </p>
+    <textarea rows="20" cols="80"></textarea>
+    <p>
+        <button onclick="sync()">刷新信息</button>
+        <button onclick="submit()">提交信息</button>
+    </p>
+    <p>
+        配置项参考：<br \>
+        canvas.height: 绘图区高度<br \>
+        canvas.width: 绘图区宽度<br \>
+        charges.k: 库仑力比例系数<br \>
+        charges.objs: 电荷对象数组<br \>
+        charges.objs[].colo: 电荷颜色<br \>
+        charges.objs[].q: 电荷量<br \>
+        charges.objs[].m: 电荷质量<br \>
+        charges.objs[].radius: 电荷显示半径<br \>
+        charges.objs[].x: 电荷所在x坐标<br \>
+        charges.objs[].y: 电荷所在y坐标<br \>
+        charges.objs[].vx: 电荷x分量速度<br \>
+        charges.objs[].vy: 电荷y分量速度<br \>
+        updater.dt: 差分算法时间间隔<br \>
+        updater.skip: 跳帧数<br \>
+        updater.interval: 相邻帧时间间隔(ms)<br \>
+        updater.alpha: 刷新透明度（拖尾效果）
+    </p>
+    <p>
+        详细的使用文档请参考<a href="./doc/code.html">这里</a>
+    </p>
+    <canvas height="600px" width="800px">
+        Your browser does not support canvas.
+    </canvas>
+    <p>
+        <button onclick="start()">继续</button>
+        <button onclick="stop()">暂停</button>
+    </p>
+    <script>
+        var config = {
+            canvas: {
+                height: 600, width: 800,
+            },
+            charges: {
+                k: 10000000,
+                objs: [
+                    {
+                        colo: "red", q: 1, m: 1, radius: 2,
+                        x: 400, y: 100, vx: 400, vy: 0,
+                    },
+                    {
+                        colo: "blue", q: 1, m: 1, radius: 2,
+                        x: 400, y: 500, vx: 400, vy: 0,
+                    },
+                    {
+                        colo: "green", q: -5, m: 2, radius: 5,
+                        x: 400, y: 300, vx: -400, vy: 0,
+                    }
+                ]
+            },
+            updater: {
+                dt: 0.004,
+                skip: 1,
+                interval: 25,
+                alpha: 0.1,
+            }
+        }
+        let cv = document.querySelector("canvas");
+        let tarea = document.querySelector("textarea");
+        let handler = null;
+        function sync() {
+            tarea.value = JSON.stringify(config, null, 2);
+        }
+        function submit() {
+            config = JSON.parse(tarea.value);
+            // Reset counter
+            if (handler) {
+                stop();
+                start();
+            }
+            // Clear the canvas
+            if (cv.getContext) {
+                var ctx = cv.getContext("2d");
+                ctx.fillStyle = "rgba(0,0,0,1)";
+                ctx.fillRect(0, 0, config.canvas.width, config.canvas.height);
+            }
+        }
+        async function invoker() {
+            let objs = config.charges.objs;
+            let height = config.canvas.height;
+            let width = config.canvas.width;
+            let k = config.charges.k;
+            let dt = config.updater.dt;
+            let alpha = config.updater.alpha;
+            let skip = config.updater.skip;
+            async function update() {
+                // Calculate forces
+                let promises = [];
+                for (let i = 0; i < objs.length; i++) {
+                    promises.push(new Promise((resolve, reject) => {
+                        let fx = 0;
+                        let fy = 0;
+                        for (let j = 0; j < objs.length; j++) {
+                            if (j === i) {
+                                continue;
+                            }
+                            let dx = objs[j].x - objs[i].x
+                            let dy = objs[j].y - objs[i].y
+                            let r = Math.sqrt(dx * dx + dy * dy);
+                            fx = fx - k * objs[j].q * objs[i].q / (r * r * r) * dx;
+                            fy = fy - k * objs[j].q * objs[i].q / (r * r * r) * dy;
+                        }
+                        resolve([fx, fy]);
+                    }))
+                }
+                let data = await Promise.all(promises);
+                // Update data
+                promises = [];
+                for (let i = 0; i < objs.length; i++) {
+                    promises.push(new Promise((resolve, reject) => {
+                        objs[i].vx = objs[i].vx + data[i][0] / objs[i].m * dt;
+                        objs[i].vy = objs[i].vy + data[i][1] / objs[i].m * dt;
+                        objs[i].x = objs[i].x + objs[i].vx * dt;
+                        objs[i].y = objs[i].y + objs[i].vy * dt;
+                        resolve();
+                    }))
+                }
+                await Promise.all(promises);
+                return;
+            }
+            function draw() {
+                if (cv.getContext) {
+                    var ctx = cv.getContext("2d");
+                    ctx.fillStyle = "rgba(0,0,0," + alpha.toString() + ")";
+                    ctx.fillRect(0, 0, width, height);
+                    objs.forEach(e => {
+                        var ctx = cv.getContext("2d");
+                        ctx.beginPath();
+                        ctx.arc(e.x, e.y, e.radius, 0, 2 * Math.PI);
+                        ctx.fillStyle = e.colo;
+                        ctx.fill();
+                    });
+                }
+            }
+            draw();
+            for (let i = 0; i < skip; i++) {
+                await update();
+            }
+        }
+        function start() {
+            if (!handler) {
+                handler = window.setInterval(invoker, config.updater.interval);
+            }
+        }
+        function stop() {
+            if (handler) {
+                window.clearInterval(handler);
+                handler = null;
+            }
+        }
+        sync();
+        submit();
+        start();
+    </script>
+</body>
+
+</html>
